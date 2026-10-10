@@ -1,0 +1,65 @@
+name: Publicar actualizaciones Android
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publicar-android-json.yml'
+      - '.github/scripts/build-android-manifest.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-pages-${{ github.event_name == 'release' && 'dispatch' || 'deploy' }}
+  cancel-in-progress: false
+
+jobs:
+  solicitar-publicacion:
+    if: github.event_name == 'release' && !github.event.release.draft && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      # Pages se despliega desde main, incluso cuando la publicación nace de una etiqueta.
+      - name: Solicitar la publicación de la última versión estable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh api --method POST "repos/$REPOSITORY/actions/workflows/publicar-android-json.yml/dispatches" -f ref=main
+
+  preparar:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Validar el android.json y la APK del último lanzamiento
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/build-android-manifest.mjs _site
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  publicar:
+    needs: preparar
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar el manifiesto en GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
